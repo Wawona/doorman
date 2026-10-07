@@ -8,9 +8,9 @@
 #ifndef DOORMAN_INTERNAL_H
 #define DOORMAN_INTERNAL_H
 
-#import <Foundation/Foundation.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include "doorman.h"
 
 /*
@@ -48,13 +48,7 @@ static inline void _dm_scrub(void *buf, size_t len) {
 }
 
 /* Scrub, free, and NULL a heap string that may have held a secret. */
-static inline void _dm_scrub_free(char **slot, size_t len) {
-    if (slot && *slot) {
-        _dm_scrub(*slot, len);
-        free(*slot);
-        *slot = NULL;
-    }
-}
+void _dm_scrub_free(char **slot, size_t len);
 
 /* Constant-time equality for two byte buffers of equal length. Returns true
  * only when the lengths match and every byte is identical, without leaking a
@@ -102,6 +96,6 @@ doorman_result_t _dm_pam_check_account(doorman_handle_t *handle);
 doorman_result_t _dm_pam_setcred(doorman_handle_t *handle, int flag);
 
 /* Fill a doorman_user_t from the passwd database (implemented in users.m). */
-BOOL _dm_fill_user_from_passwd(const char *name, doorman_user_t *out);
+bool _dm_fill_user_from_passwd(const char *name, doorman_user_t *out);
 
 #endif /* DOORMAN_INTERNAL_H */

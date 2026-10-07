@@ -32,6 +32,31 @@ bool _dm_name_ok(const char *name) {
     return true;
 }
 
+const char *doorman_strerror(doorman_result_t result) {
+    switch (result) {
+        case DOORMAN_SUCCESS:           return "success";
+        case DOORMAN_ERR_AUTH:          return "authentication failed";
+        case DOORMAN_ERR_USER_UNKNOWN:  return "unknown user";
+        case DOORMAN_ERR_ACCT_DISABLED: return "account is disabled or expired";
+        case DOORMAN_ERR_PERM:          return "insufficient privileges";
+        case DOORMAN_ERR_CONV:          return "conversation error";
+        case DOORMAN_ERR_ABORT:         return "transaction aborted";
+        case DOORMAN_ERR_NO_SESSION:    return "no such session";
+        case DOORMAN_ERR_SYSTEM:        return "system error";
+        case DOORMAN_ERR_INVALID_ARG:   return "invalid argument";
+        case DOORMAN_ERR_UNSUPPORTED:   return "operation not supported";
+    }
+    return "unknown error";
+}
+
+void _dm_scrub_free(char **slot, size_t len) {
+    if (slot && *slot) {
+        _dm_scrub(*slot, len);
+        free(*slot);
+        *slot = NULL;
+    }
+}
+
 bool _dm_consttime_equal(const void *a, const void *b, size_t len) {
     if (!a || !b) return false;
     const volatile unsigned char *pa = (const volatile unsigned char *)a;

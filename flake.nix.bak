@@ -46,15 +46,15 @@
         buildPhase = ''
           ${commonEnv}
           SHIMS=include/doorman_swift_shims.h
-          for f in src/util.c src/backend_pam.c src/sessions_spawn.c; do
+          for f in src/util.c src/backend_pam.c src/backend_dslocal.m src/doorman.m; do
             base=$(basename "$f")
             out="''${base%.*}.o"
-            xcrun clang ${archs} ${cflags} -c -Iinclude "$f" -o "$out"
+            xcrun clang ${archs} ${cflags} -fobjc-arc -c -Iinclude "$f" -o "$out"
           done
           for sw in Sources/*.swift; do
             out="''$(basename "$sw" .swift)-swift.o"
-            xcrun swiftc -c "$sw" -parse-as-library -import-objc-header "$SHIMS" \
-              -Iinclude -Isrc -O -o "$out" || exit 1
+            xcrun swiftc -c "$sw" -import-objc-header "$SHIMS" -Iinclude -O \
+              -o "$out" || exit 1
           done
           xcrun libtool -static -o libdoorman.a *.o
           xcrun clang ${archs} -dynamiclib -install_name @rpath/libdoorman.dylib \
@@ -82,13 +82,9 @@
         dontFixup = true;
         buildPhase = ''
           ${commonEnv}
-          xcrun clang ${archs} ${cflags} -c cli_conv.c -I${doorman}/include -o cli_conv.o
-          xcrun swiftc ${archs} -parse-as-library -O -o doorman \
-            -import-objc-header ${doorman}/include/doorman_swift_shims.h \
-            -I${doorman}/include cli_conv.o \
-            DoormanCLI.swift ${doorman}/lib/libdoorman.a \
-            -framework Foundation -framework OpenDirectory -framework Security \
-            -Xlinker -lpam -Xlinker -lobjc
+          xcrun clang ${archs} ${cflags} -fobjc-arc -o doorman \
+            -I${doorman}/include doorman.m ${doorman}/lib/libdoorman.a \
+            ${linkFlags} -lobjc
         '';
         installPhase = ''
           mkdir -p $out/bin

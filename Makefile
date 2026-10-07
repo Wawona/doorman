@@ -1,20 +1,7 @@
 # Makefile for libdoorman + CLI + example + tests.
-#
-# This is the plain (non-Nix) build used by CI and by anyone consuming the
-# framework normally. It builds for the host architecture (arm64 on Apple
-# Silicon); flake.nix builds universal (arm64 + x86_64) binaries, which is
-# what tagged releases ship.
-#
-# Targets:
-#   make            build the library, CLI, example, and tests
-#   make lib        build libdoorman.a and libdoorman.dylib
-#   make cli        build the doorman CLI (+ Linux-tool symlinks)
-#   make example    build the macdm example
-#   make test       build and run the (unprivileged) unit tests
-#   make install    install lib/headers/bin into $(PREFIX) (default /usr/local)
-#   make clean
 
-CC        ?= xcrun clang
+CC        := xcrun clang
+SWIFT     ?= xcrun swiftc
 ARCH      ?= $(shell uname -m)
 PREFIX    ?= /usr/local
 
@@ -23,34 +10,36 @@ OBJ       := $(BUILD)/obj
 LIBDIR    := $(BUILD)/lib
 BINDIR    := $(BUILD)/bin
 
-# Strict, warnings-as-errors. This is the same set CI enforces; the library is
-# expected to build clean under all of it.
 STRICT    := -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion \
              -Wcast-qual -Wpointer-arith -Wstrict-prototypes -Wmissing-prototypes \
              -Wformat=2 -Wundef -Wvla -Werror
 
-# -fvisibility=hidden keeps every internal (_dm_*) symbol out of the dynamic
-# symbol table; only the doorman_* API (marked default in the header) is
-# exported. Smaller dylib, faster dyld binding, more room to inline.
 CFLAGS    := -arch $(ARCH) -O2 -fvisibility=hidden $(STRICT) -Idoorman/include
-# Objective-C translation units are built under ARC; the pure-C example is not.
-OBJCARC   := -fobjc-arc
+SHIMS     := doorman/include/doorman_swift_shims.h
+SWIFT_FLAGS := -parse-as-library -import-objc-header $(SHIMS) -I doorman/include -I doorman/src -O
+
+LIB_C_SRCS  := doorman/src/util.c doorman/src/backend_pam.c doorman/src/sessions_spawn.c
+LIB_SWIFT   := $(wildcard doorman/Sources/*.swift)
+LIB_C_OBJS  := $(patsubst doorman/src/%.c,$(OBJ)/%.o,$(LIB_C_SRCS))
+LIB_SWIFT_OBJS := $(patsubst doorman/Sources/%.swift,$(OBJ)/%-swift.o,$(LIB_SWIFT))
+LIB_OBJS    := $(LIB_C_OBJS) $(LIB_SWIFT_OBJS)
+
 LDFRAME   := -framework Foundation -framework OpenDirectory -framework Security
 LDLIBS    := -lpam -lobjc
-
-LIB_SRCS  := $(wildcard doorman/src/*.m)
-LIB_OBJS  := $(patsubst doorman/src/%.m,$(OBJ)/%.o,$(LIB_SRCS))
 
 STATICLIB := $(LIBDIR)/libdoorman.a
 DYLIB     := $(LIBDIR)/libdoorman.dylib
 
 TOOLLINKS := useradd userdel passwd groupadd groupdel usermod gpasswd
 
-.PHONY: all lib cli example test install clean
+.PHONY: all lib cli example test install clean tests
 all: lib cli example tests
 
-$(OBJ)/%.o: doorman/src/%.m | $(OBJ)
-	$(CC) $(CFLAGS) $(OBJCARC) -c $< -o $@
+$(OBJ)/%.o: doorman/src/%.c | $(OBJ)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ)/%-swift.o: doorman/Sources/%.swift | $(OBJ)
+	$(SWIFT) -c $< $(SWIFT_FLAGS) -o $@
 
 $(OBJ) $(LIBDIR) $(BINDIR):
 	@mkdir -p $@
@@ -61,12 +50,21 @@ $(STATICLIB): $(LIB_OBJS) | $(LIBDIR)
 	xcrun ar rcs $@ $(LIB_OBJS)
 
 $(DYLIB): $(LIB_OBJS) | $(LIBDIR)
-	$(CC) $(CFLAGS) $(OBJCARC) -dynamiclib -install_name @rpath/libdoorman.dylib \
+	$(CC) $(CFLAGS) -dynamiclib -install_name @rpath/libdoorman.dylib \
 		$(LIB_OBJS) $(LDFRAME) $(LDLIBS) -o $@
 
+CLI_SWIFT_FLAGS := -parse-as-library -import-objc-header $(SHIMS) -I doorman/include -I doorman/src -O
+
+CLI_CONV_OBJ := $(OBJ)/cli_conv.o
+
 cli: $(BINDIR)/doorman
-$(BINDIR)/doorman: cli/doorman.m $(STATICLIB) | $(BINDIR)
-	$(CC) $(CFLAGS) $(OBJCARC) $< $(STATICLIB) $(LDFRAME) $(LDLIBS) -o $@
+$(CLI_CONV_OBJ): cli/cli_conv.c | $(OBJ)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BINDIR)/doorman: cli/DoormanCLI.swift $(CLI_CONV_OBJ) $(STATICLIB) | $(BINDIR)
+	$(SWIFT) cli/DoormanCLI.swift $(CLI_SWIFT_FLAGS) $(CLI_CONV_OBJ) $(STATICLIB) \
+		-framework Foundation -framework OpenDirectory -framework Security \
+		-Xlinker -lpam -Xlinker -lobjc -o $@
 	@for t in $(TOOLLINKS); do ln -sf doorman $(BINDIR)/$$t; done
 
 example: $(BINDIR)/macdm
@@ -74,8 +72,10 @@ $(BINDIR)/macdm: examples/macdm/macdm.c $(STATICLIB) | $(BINDIR)
 	$(CC) $(CFLAGS) $< $(STATICLIB) $(LDFRAME) $(LDLIBS) -o $@
 
 tests: $(BINDIR)/test_doorman
-$(BINDIR)/test_doorman: tests/test_doorman.m $(STATICLIB) | $(BINDIR)
-	$(CC) $(CFLAGS) $(OBJCARC) $< $(STATICLIB) $(LDFRAME) $(LDLIBS) -o $@
+$(BINDIR)/test_doorman: tests/TestDoorman.swift $(STATICLIB) | $(BINDIR)
+	$(SWIFT) tests/TestDoorman.swift -parse-as-library $(CLI_SWIFT_FLAGS) $(STATICLIB) \
+		-framework Foundation -framework OpenDirectory -framework Security \
+		-Xlinker -lpam -Xlinker -lobjc -o $@
 
 test: tests
 	@echo "== unit tests =="

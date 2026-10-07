@@ -1,22 +1,11 @@
 /*
- * backend_pam.m - drive the OpenPAM stack that ships with macOS.
- *
- * This is the most faithful "port of the Linux method": control is handed to
- * whatever /etc/pam.d/<service> declares (pam_opendirectory, pam_unix,
- * smartcard modules, ...), so behaviour is administrator-configurable without
- * recompiling. Doorman's conversation is bridged onto a struct pam_conv so the
- * same credential prompts flow through unchanged.
+ * backend_pam.c - drive the OpenPAM stack that ships with macOS.
  */
-
-#import <Foundation/Foundation.h>
 #include <security/pam_appl.h>
 #include <stdlib.h>
 #include <string.h>
 #include "doorman_internal.h"
 
-/* The live PAM transaction, kept alive between authenticate/acct/setcred.
- * pamh MUST be the first member: doorman_end() treats the box as a
- * pam_handle_t** to release it without knowing this layout. */
 typedef struct {
     pam_handle_t *pamh;
     struct pam_conv conv;
@@ -48,12 +37,6 @@ static doorman_result_t result_from_pam(int status) {
     }
 }
 
-/*
- * PAM -> doorman conversation bridge. appdata_ptr is the doorman_handle_t. Each
- * PAM message is translated, forwarded to the application's conversation, and
- * the replies are copied into PAM-owned storage (PAM frees them with free()).
- * Every intermediate secret is scrubbed before its buffer is released.
- */
 static int conversation_bridge(int num_msg,
                                const struct pam_message **msg,
                                struct pam_response **resp,
@@ -121,7 +104,6 @@ doorman_result_t _dm_pam_authenticate(doorman_handle_t *handle) {
 
     rc = pam_authenticate(box->pamh, 0);
 
-    /* Sync back a username that the stack may have learned. */
     const void *pam_user = NULL;
     if (pam_get_item(box->pamh, PAM_USER, &pam_user) == PAM_SUCCESS &&
         pam_user && !handle->user) {
@@ -129,7 +111,7 @@ doorman_result_t _dm_pam_authenticate(doorman_handle_t *handle) {
     }
 
     if (rc == PAM_SUCCESS) {
-        handle->backend_state = box;   /* keep alive for acct_mgmt/setcred */
+        handle->backend_state = box;
     } else {
         pam_end(box->pamh, rc);
         free(box);
